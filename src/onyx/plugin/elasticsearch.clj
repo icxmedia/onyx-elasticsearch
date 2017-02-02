@@ -281,8 +281,8 @@
                                                             :elasticsearch/mapping
                                                             :elasticsearch/write-type]))
                        default-vals)]
-        (log/debug (str "Message Settings: " settings))
-        (write-elasticsearch connection document settings)))
+        (let [response (write-elasticsearch connection document settings)]
+            (log/info :task ::write-batch :response response))))
     {})
 
   (seal-resource

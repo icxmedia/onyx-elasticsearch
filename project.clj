@@ -1,4 +1,4 @@
-(defproject org.onyxplatform/onyx-elasticsearch "0.9.15.0"
+(defproject org.onyxplatform/onyx-elasticsearch "0.9.15.0-feldman"
   :description "Onyx plugin for Elasticsearch"
   :url "https://github.com/onyx-platform/onyx-elasticsearch"
   :license {:name "Eclipse Public License"
