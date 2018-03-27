@@ -103,8 +103,8 @@
 (def v-peers (onyx.api/start-peers 2 peer-group))
 
 (defn run-job
+  "Runs the job putting the segments provided through the system."
   [name ch lc catalog & segments]
-  (println "Running job")
   (doseq [seg segments] (>!! ch seg))
   (>!! ch :done)
   (let [job-info (onyx.api/submit-job
@@ -115,7 +115,12 @@
                    :task-scheduler :onyx.task-scheduler/balanced})]
     (info (str "Awaiting job completion for " name))
     (println "Awaiting job completion")
-    (onyx.api/await-job-completion peer-config (:job-id job-info))))
+    (onyx.api/await-job-completion peer-config (:job-id job-info))
+    (Thread/sleep 7000)
+    (doseq [v-peer v-peers]
+      (onyx.api/shutdown-peer v-peer))
+    (onyx.api/shutdown-peer-group peer-group)
+    (onyx.api/shutdown-env env)))
 
 (deftest write-test
   (run-job
@@ -130,15 +135,6 @@
    {:elasticsearch/message {:name "http:upsert_detail-msg_noid" :index "two"} :elasticsearch/write-type :upsert}
    {:elasticsearch/message {:name "http:insert-to-be-deleted"} :elasticsearch/doc-id "3"}
    {:elasticsearch/doc-id "3" :elasticsearch/write-type :delete})
-
-  (Thread/sleep 7000)
-
-  (doseq [v-peer v-peers]
-    (onyx.api/shutdown-peer v-peer))
-
-  (onyx.api/shutdown-peer-group peer-group)
-
-  (onyx.api/shutdown-env env)
 
   (let [conn (u/connect-rest-client)]
     (testing "Insert: plain message with no id defined"
