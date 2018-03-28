@@ -186,15 +186,62 @@
     :elasticsearch/doc-id "3"
     :elasticsearch/write-type :upsert
     :elasticsearch/version_type "external"
+    :elasticsearch/version 20045}
+   {:elasticsearch/message {:name "http:insert_detail-msg_id updated"}
+    :elasticsearch/doc-id "4"
+    :elasticsearch/write-type :upsert
+    :elasticsearch/version_type "external"
+    :elasticsearch/version 12340000}
+   {:elasticsearch/message {:name "http:insert_detail-msg_id again"}
+    :elasticsearch/doc-id "4"
+    :elasticsearch/write-type :upsert
+    :elasticsearch/version_type "external"
     :elasticsearch/version 20045})
 
   (let [conn (u/connect-rest-client)]
     (let [doc1 (esrd/get conn id "_default_" "1")
           doc2 (esrd/get conn id "_default_" "2")
-          doc3 (esrd/get conn id "_default_" "3")]
+          doc3 (esrd/get conn id "_default_" "3")
+          doc4 (esrd/get conn id "_default_" "4")]
       (testing "Insert followed by upsert with id"
         (is (= 1234 (:_version doc1))))
       (testing "Upsert with no previous doc"
         (is (= 1234 (:_version doc2))))
       (testing "Upsert with no previous doc then upsert again"
-        (is (= 20045 (:_version doc3)))))))
+        (is (= 20045 (:_version doc3))))
+      (testing "Failed upsert due to version conflict"
+        (is (= 12340000 (:_version doc4)))))))
+
+
+(deftest external-version-test-deletes
+  (run-job
+   "HTTP Client Job with External Message"
+   in-chan-http
+   lifecycles-http
+   catalog-http&write
+   {:elasticsearch/message {:name "http:insert-to-be-deleted"}
+    :elasticsearch/doc-id "1"
+    :elasticsearch/write-type :upsert
+    :elasticsearch/version_type "external"
+    :elasticsearch/version "1234"}
+   {:elasticsearch/doc-id "1"
+    :elasticsearch/write-type :delete
+    :elasticsearch/version_type "external"
+    :elasticsearch/version "12345"}
+   {:elasticsearch/message {:name "http:insert-to-be-deleted"}
+    :elasticsearch/doc-id "2"
+    :elasticsearch/write-type :upsert
+    :elasticsearch/version_type "external"
+    :elasticsearch/version "1234"}
+   {:elasticsearch/doc-id "2"
+    :elasticsearch/write-type :delete
+    :elasticsearch/version_type "external"
+    :elasticsearch/version "12"})
+
+  (let [conn (u/connect-rest-client)]
+    (let [doc1 (esrd/get conn id "_default_" "1")
+          doc2 (esrd/get conn id "_default_" "2")]
+      (testing "Delete a document with external versioning"
+        (is (nil? doc1)))
+      (testing "Try to delete a document using an earlier version"
+        (is (= 1234 (:_version doc2)))))))
