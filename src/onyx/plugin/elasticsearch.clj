@@ -211,6 +211,17 @@
 ;; Writer
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn version-builder
+  "Handles checking the write settings for version arguments. Returns
+  a list because of the apply/flatten used by run-as"
+  [settings]
+  (let [version-type
+        (:elasticsearch/version_type settings "internal")]
+    (if (= version-type "external")
+      (into [] (select-keys settings [:elasticsearch/version_type
+                                      :elasticsearch/version]))
+      [:elasticsearch/version_type version-type])))
+
 (defn- write-elasticsearch [cxn doc settings]
   (let [client-type (:elasticsearch/client-type settings)
         index (:elasticsearch/index settings)
@@ -218,13 +229,14 @@
         doc-id (:elasticsearch/doc-id settings)
         write-type (if doc-id
                      (:elasticsearch/write-type settings)
-                     (keyword (str (name (:elasticsearch/write-type settings)) "-noid")))]
+                     (keyword (str (name (:elasticsearch/write-type settings)) "-noid")))
+        version-args (version-builder settings)]
     (case write-type
       :insert (run-as client-type :create cxn index mapping doc :id doc-id)
       :insert-noid (run-as client-type :create cxn index mapping doc)
-      :upsert (run-as client-type :put cxn index mapping doc-id doc)
+      :upsert (run-as client-type :put cxn index mapping doc-id doc version-args)
       :upsert-noid (run-as client-type :create cxn index mapping doc)
-      :delete (run-as client-type :delete cxn index mapping doc-id)
+      :delete (run-as client-type :delete cxn index mapping doc-id version-args)
       :default (throw (Exception. (str "Invalid write type: " write-type))))))
 
 (defn inject-writer
@@ -279,7 +291,9 @@
                                             (:message msg) [:elasticsearch/index
                                                             :elasticsearch/doc-id
                                                             :elasticsearch/mapping
-                                                            :elasticsearch/write-type]))
+                                                            :elasticsearch/write-type
+                                                            :elasticsearch/version
+                                                            :elasticsearch/version_type]))
                        default-vals)]
         (log/debug (str "Message Settings: " settings))
         (write-elasticsearch connection document settings)))

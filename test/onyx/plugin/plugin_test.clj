@@ -1,6 +1,6 @@
 (ns onyx.plugin.plugin-test
   (:require [clojure.core.async :refer [>!! chan]]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [clojurewerkz.elastisch.query :as q]
             [clojurewerkz.elastisch.rest
              [document :as esrd]
@@ -44,9 +44,9 @@
    :onyx.messaging/peer-port 40200
    :onyx.messaging/bind-addr "localhost"})
 
-(def env (onyx.api/start-env env-config))
+#_(def env (onyx.api/start-env env-config))
 
-(def peer-group (onyx.api/start-peer-group peer-config))
+#_(def peer-group (onyx.api/start-peer-group peer-config))
 
 (def n-messages 7)
 
@@ -100,21 +100,23 @@
    {:lifecycle/task :write-messages
     :lifecycle/calls :onyx.plugin.elasticsearch/write-messages-calls}])
 
-(def v-peers (onyx.api/start-peers 2 peer-group))
+;(def v-peers (onyx.api/start-peers 2 peer-group))
 
 (defn run-job
   "Runs the job putting the segments provided through the system."
   [name ch lc catalog & segments]
   (doseq [seg segments] (>!! ch seg))
   (>!! ch :done)
-  (let [job-info (onyx.api/submit-job
+  (let [env (onyx.api/start-env env-config)
+        peer-group (onyx.api/start-peer-group peer-config)
+        v-peers (onyx.api/start-peers 2 peer-group)
+        job-info (onyx.api/submit-job
                   peer-config
                   {:catalog catalog
                    :workflow workflow
                    :lifecycles lc
                    :task-scheduler :onyx.task-scheduler/balanced})]
     (info (str "Awaiting job completion for " name))
-    (println "Awaiting job completion")
     (onyx.api/await-job-completion peer-config (:job-id job-info))
     (Thread/sleep 7000)
     (doseq [v-peer v-peers]
@@ -156,3 +158,43 @@
     (testing "Delete: detail defined"
       (let [res (esrd/search conn id "_default_" :query (q/term :_id "3"))]
         (is (= 0 (esrsp/total-hits res)))))))
+
+(deftest external-version-test
+  (run-job
+   "HTTP Client Job with External Message"
+   in-chan-http
+   lifecycles-http
+   catalog-http&write
+   {:elasticsearch/message {:name "http:insert_detail-msg_id"}
+    :elasticsearch/doc-id "1"}
+   {:elasticsearch/message {:name "http:insert_detail-msg_id updated" :new "new"}
+    :elasticsearch/doc-id "1"
+    :elasticsearch/write-type :upsert
+    :elasticsearch/version_type "external"
+    :elasticsearch/version 1234}
+   {:elasticsearch/message {:name "http:insert_detail-msg_id updated"}
+    :elasticsearch/doc-id "2"
+    :elasticsearch/write-type :upsert
+    :elasticsearch/version_type "external"
+    :elasticsearch/version 1234}
+   {:elasticsearch/message {:name "http:insert_detail-msg_id updated"}
+    :elasticsearch/doc-id "3"
+    :elasticsearch/write-type :upsert
+    :elasticsearch/version_type "external"
+    :elasticsearch/version 1234}
+   {:elasticsearch/message {:name "http:insert_detail-msg_id again"}
+    :elasticsearch/doc-id "3"
+    :elasticsearch/write-type :upsert
+    :elasticsearch/version_type "external"
+    :elasticsearch/version 20045})
+
+  (let [conn (u/connect-rest-client)]
+    (let [doc1 (esrd/get conn id "_default_" "1")
+          doc2 (esrd/get conn id "_default_" "2")
+          doc3 (esrd/get conn id "_default_" "3")]
+      (testing "Insert followed by upsert with id"
+        (is (= 1234 (:_version doc1))))
+      (testing "Upsert with no previous doc"
+        (is (= 1234 (:_version doc2))))
+      (testing "Upsert with no previous doc then upsert again"
+        (is (= 20045 (:_version doc3)))))))
